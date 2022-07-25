@@ -26,6 +26,7 @@
 #include "G4tgbVolumeMgr.hh"
 #include "G4tgrMessenger.hh"
 #include "G4UserLimits.hh"
+#include "CLHEP/Units/PhysicalConstants.h"
 
 #include "g4root.hh"
 #include "g4xml.hh"
@@ -42,7 +43,6 @@ class G4SimpleSteppingAction : public G4UserSteppingAction, public G4UImessenger
 {
   protected:
     G4UIcommand* fVolIDCmd;
-    // G4UIcommand* fStepLimitCmd; // not sure if this goes in this class or the run class
     G4UIcmdWithAString* fOutputFormatCmd;
     G4UIcmdWithAString* fOutputOptionCmd;
     G4UIcmdWithABool* fRecordAllStepsCmd;
@@ -79,7 +79,6 @@ class G4SimpleSteppingAction : public G4UserSteppingAction, public G4UImessenger
     vector<G4int> fIRep;
 
     map<G4VPhysicalVolume*, int> fVolIDMap;
-    // map<string, double> fstepLimitsMap;
 
     // bools for setting which fields to write to output
     G4bool fWEv, fWPid, fWTS, fWKE, fWEDep, fWR, fWLR, fWP, fWT, fWV;
@@ -97,12 +96,6 @@ class G4SimpleSteppingAction : public G4UserSteppingAction, public G4UImessenger
       fVolIDCmd->SetGuidance("Volumes with name matching [pattern] will be given volume ID "
                              "based on the [replacement] rule. Replacement rule must produce an integer."
                              " Patterns which replace to 0 or -1 are forbidden and will be omitted.");
-
-      // fStepLimitCmd = new G4UIcommand("/g4simple/setStepLimit", this);
-      // fStepLimitCmd->SetParameter(new G4UIparameter("pattern", 's', false));
-      // fStepLimitCmd->SetParameter(new G4UIparameter("max", 's', false));
-      // fStepLimitCmd->SetGuidance("Volumes with name matching [patter] will be given a max step size "
-      //                        "based on [max] in units of mm.");
 
       fOutputFormatCmd = new G4UIcmdWithAString("/g4simple/setOutputFormat", this);
       string candidates = "csv xml root";
@@ -166,7 +159,6 @@ class G4SimpleSteppingAction : public G4UserSteppingAction, public G4UImessenger
       }
       delete man;
       delete fVolIDCmd;
-      // delete fStepLimitCmd;
       delete fOutputFormatCmd;
       delete fOutputOptionCmd;
       delete fRecordAllStepsCmd;
@@ -180,15 +172,7 @@ class G4SimpleSteppingAction : public G4UserSteppingAction, public G4UImessenger
         iss >> pattern >> replacement;
         fPatternPairs.push_back(pair<regex,string>(regex(pattern),replacement));
       }
-      // if(command == fStepLimitCmd) {
-      //   cout << "\n\n\t\tThis is my test!\n";
-      //   istringstream iss(newValues);
-      //   string pattern;
-      //   string max;
-      //   iss >> pattern >> max;
-      //   fstepLimitsMap[pattern] = std::stof(max);
-      //   // fPatternPairs.push_back(pair<regex,string>(regex(pattern),replacement));
-      // }
+
       if(command == fOutputFormatCmd) {
         // also set recommended options.
         // override option by subsequent call to /g4simple/setOutputOption
@@ -511,7 +495,7 @@ class G4SimpleRunManager : public G4RunManager, public G4UImessenger
     G4UIcmdWithAString* fListVolsCmd;
 
     G4UIcommand* fStepLimitCmd;
-    map<string, double> fstepLimitsMap;
+    map<string, pair<float,string> > fstepLimitsMap;
 
 
 
@@ -549,8 +533,11 @@ class G4SimpleRunManager : public G4RunManager, public G4UImessenger
       fStepLimitCmd = new G4UIcommand("/g4simple/setStepLimit", this);
       fStepLimitCmd->SetParameter(new G4UIparameter("pattern", 's', false));
       fStepLimitCmd->SetParameter(new G4UIparameter("max", 's', false));
+      fStepLimitCmd->SetParameter(new G4UIparameter("unit", 's', false));
       fStepLimitCmd->SetGuidance("Volumes with name matching [patter] will be given a max step size "
-                             "based on [max] in units of mm.");
+                             "based on [max] in units of [unit]. Defaults to mm.");
+      fListVolsCmd->AvailableForStates(G4State_Idle, G4State_GeomClosed, G4State_EventProc);
+
     }
 
     ~G4SimpleRunManager() {
@@ -572,27 +559,26 @@ class G4SimpleRunManager : public G4RunManager, public G4UImessenger
       else if(command == fStepLimitCmd) {
         istringstream iss(newValues);
         string pattern;
-        string max;
-        iss >> pattern >> max;
-        fstepLimitsMap[pattern] = std::stof(max);
-      }
-      else if(command == fDetectorCmd) {
-        // Check to see if step limits were called
-        if(!fstepLimitsMap.empty()) {
-          cout << "fstepLimitsMap is not empty!" << endl;
-          // if they were called load the volume store
-          G4PhysicalVolumeStore* volumeStore = G4PhysicalVolumeStore::GetInstance();
-          for(size_t i=0; i<volumeStore->size(); i++) {
-            // fix the max step size for corresponding volume id
-            G4VPhysicalVolume* volume = (*volumeStore)[i];
-            double maxStep = fstepLimitsMap[volume->GetName()];
+        double max;
+        string unit;
+        iss >> pattern >> max >> unit;
+        
+        G4PhysicalVolumeStore* volumeStore = G4PhysicalVolumeStore::GetInstance();
+        for(size_t i=0; i<volumeStore->size(); i++) {
+          // fix the max step size for corresponding volume id
+          G4VPhysicalVolume* volume = (*volumeStore)[i];
+          if(pattern == volume->GetName()) {
             cout << "volume name: " << volume->GetName() << endl;
-            cout << "assoc. max step: " << maxStep << endl;
-            if(maxStep > 0.0) {
-              volume->GetLogicalVolume()->SetUserLimits(new G4UserLimits(maxStep));
+            cout << "assoc. max step: " << max << endl;
+            cout << "assoc. units: " << unit << endl;
+            cout << "max * CLHEP::mm " << max*CLHEP::mm << endl;
+            if(max > 0.0) {
+              volume->GetLogicalVolume()->SetUserLimits(new G4UserLimits(max*CLHEP::mm));
             }
           }
         }
+      }
+      else if(command == fDetectorCmd) {
         istringstream iss(newValues);
         string filename;
         string validate;
