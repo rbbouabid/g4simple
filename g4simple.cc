@@ -27,6 +27,8 @@
 #include "G4tgrMessenger.hh"
 #include "G4UserLimits.hh"
 #include "CLHEP/Units/PhysicalConstants.h"
+#include "G4UnitsTable.hh"
+#include "G4AutoDelete.hh"
 
 #include "g4root.hh"
 #include "g4xml.hh"
@@ -585,6 +587,56 @@ class G4SimpleRunManager : public G4RunManager, public G4UImessenger
         iss >> filename >> validate;
         G4GDMLParser parser;
         parser.Read(filename, validate == "1" || validate == "true" || validate == "True");
+
+        const G4GDMLAuxMapType* auxmap = parser.GetAuxMap();
+        cout << "Found " << auxmap->size() << " volume(s) with auxiliary information." << endl << endl;
+
+        //for(auto const& [logVol, listType] : *auxmap) {
+        for ( const auto &auxInfo : *auxmap ) {
+          cout << "Volume " << auxInfo.first->GetName() << " has the following list of auxiliary information: " << endl;
+          //cout << "Volume " << logVol->GetName() << " has the following list of auxiliary information: " << endl;
+          for(auto const& auxtype : auxInfo.second) {
+            G4double value             = atof(auxtype.value);
+            G4double val_unit          = 1;  //--no unit
+            G4String provided_category = "NONE";
+            if((auxtype.unit) && (auxtype.unit != "")) {  // -- if provided and non-NULL
+              val_unit          = G4UnitDefinition::GetValueOf(auxtype.unit);
+              provided_category = G4UnitDefinition::GetCategory(auxtype.unit);
+
+              G4cout << " Unit parsed = " << auxtype.unit << " from unit category: " << provided_category.c_str() << G4endl;
+              }
+            value *= val_unit;  //-- Now do something with the value, making sure that the unit is appropriate
+          
+            if(auxtype.type == "StepLimit") { //-- check that steplimit has valid length unit category
+              G4String steplimit_category = "Length";
+              if(provided_category == steplimit_category) {
+                G4cout << "Valid steplimit unit category obtained: " << provided_category.c_str() << G4endl;
+                // -- convert length to mm
+                value = (value / CLHEP::mm) * CLHEP::mm;
+                G4UserLimits* fStepLimit = new G4UserLimits(value);
+                G4AutoDelete::Register(fStepLimit);
+                auxInfo.first->SetUserLimits(fStepLimit);
+                G4cout << "StepLimit for log Volume: " << auxInfo.first->GetName() << "  " << value << "  " << value / CLHEP::cm << " cm" << G4endl;
+              }
+            
+              else if(provided_category == "NONE") {  //--no unit category provided, use the default CLHEP::mm
+                G4cout << "StepLimit in geometry file does not have a unit!" << " Defaulting to mm..." << G4endl;
+                value *= CLHEP::mm;
+                G4UserLimits* fStepLimit = new G4UserLimits(value);
+                G4AutoDelete::Register(fStepLimit);
+                auxInfo.first->SetUserLimits(fStepLimit);
+                G4cout << "StepLimit for log Volume: " << auxInfo.first->GetName() << "  " << value << "  " << value / CLHEP::cm << " cm" << G4endl;
+              }
+            
+              else {  //--wrong unit category provided
+                G4cout << "StepLimit does not have a valid length unit!" << G4endl;
+                G4cout << "Category of unit provided = " << provided_category << G4endl;
+                exit(EXIT_FAILURE);
+              }
+            }
+          }
+        }
+
         SetUserInitialization(new G4SimpleDetectorConstruction(parser.GetWorldVolume()));
       }
       else if(command == fTGDetectorCmd) {
@@ -620,7 +672,7 @@ class G4SimpleRunManager : public G4RunManager, public G4UImessenger
         cout << ":" << endl;
         for(size_t i=0; i<volumeStore->size(); i++) {
           string name = volumeStore->at(i)->GetName();
-	  int iRep = volumeStore->at(i)->GetCopyNo();
+	        int iRep = volumeStore->at(i)->GetCopyNo();
           if(!doMatching || regex_match(name, pattern)) cout << name << ' ' << iRep << endl;
         }
       }
