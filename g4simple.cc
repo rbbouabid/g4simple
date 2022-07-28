@@ -26,9 +26,22 @@
 #include "G4tgbVolumeMgr.hh"
 #include "G4tgrMessenger.hh"
 #include "G4UserLimits.hh"
+#include "G4StepLimiter.hh"
 #include "CLHEP/Units/PhysicalConstants.h"
 #include "G4UnitsTable.hh"
 #include "G4AutoDelete.hh"
+
+#include "G4PhysicsConstructorFactory.hh"
+#include "G4PhysicsConstructorRegistry.hh"
+#include "G4ParticleDefinition.hh"
+#include "G4ParticleWithCuts.hh"
+#include "G4ParticleTypes.hh"
+#include "G4ParticleTable.hh"
+#include "G4ProcessTable.hh"
+
+// #ifndef theParticleIterator
+// #define theParticleIterator GetParticleIterator()
+// #endif
 
 #include "g4root.hh"
 #include "g4xml.hh"
@@ -534,8 +547,8 @@ class G4SimpleRunManager : public G4RunManager, public G4UImessenger
 
       fStepLimitCmd = new G4UIcommand("/g4simple/setStepLimit", this);
       fStepLimitCmd->SetParameter(new G4UIparameter("pattern", 's', false));
-      fStepLimitCmd->SetParameter(new G4UIparameter("max", 's', false));
-      fStepLimitCmd->SetParameter(new G4UIparameter("unit", 's', false));
+      //fStepLimitCmd->SetParameter(new G4UIparameter("max", 's', false));
+      //fStepLimitCmd->SetParameter(new G4UIparameter("unit", 's', false));
       fStepLimitCmd->SetGuidance("Volumes with name matching [patter] will be given a max step size "
                              "based on [max] in units of [unit]. Defaults to mm.");
       fListVolsCmd->AvailableForStates(G4State_Idle, G4State_GeomClosed, G4State_EventProc);
@@ -561,24 +574,27 @@ class G4SimpleRunManager : public G4RunManager, public G4UImessenger
       else if(command == fStepLimitCmd) {
         istringstream iss(newValues);
         string pattern;
-        double max;
-        string unit;
-        iss >> pattern >> max >> unit;
-        
-        G4PhysicalVolumeStore* volumeStore = G4PhysicalVolumeStore::GetInstance();
-        for(size_t i=0; i<volumeStore->size(); i++) {
-          // fix the max step size for corresponding volume id
-          G4VPhysicalVolume* volume = (*volumeStore)[i];
-          if(pattern == volume->GetName()) {
-            cout << "volume name: " << volume->GetName() << endl;
-            cout << "assoc. max step: " << max << endl;
-            cout << "assoc. units: " << unit << endl;
-            cout << "max * CLHEP::mm " << max*CLHEP::mm << endl;
-            if(max > 0.0) {
-              volume->GetLogicalVolume()->SetUserLimits(new G4UserLimits(max*CLHEP::mm));
-            }
+        // double max;
+        // string unit;
+        iss >> pattern; // >> max >> unit;
+
+        cout << "particle name: " << pattern << endl;
+
+        auto theParticleIterator = G4ParticleTable::GetParticleTable()->GetIterator();
+        theParticleIterator->reset();
+        while( (*theParticleIterator)() ) {
+          G4ParticleDefinition* particle = theParticleIterator->value();
+          G4ProcessManager* pmanager = particle->GetProcessManager();
+          G4String particleName = particle->GetParticleName();
+          // step limits
+          if(pattern == particleName) {
+            pmanager->AddProcess(new G4StepLimiter, -1, -1, 3);
+            cout << "Steps will be limited for: " << particleName << endl;
+            // MGLog(trace) << "Steps will be limited for " << particleName << endlog;
           }
         }
+        
+
       }
       else if(command == fDetectorCmd) {
         istringstream iss(newValues);
